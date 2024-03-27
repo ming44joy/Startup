@@ -1,0 +1,176 @@
+---
+title: "Start-Up Success"
+author: "mswartz"
+date: "2024-03-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## Introduction
+
+
+```{r load_library}
+library(readxl) # Read excel files
+library(ggplot2) # Visualizations
+library(dplyr) # Data manipulation 
+library(corrplot) # Correlation matrices
+library(caret) # Machine learning 
+library(lubridate) # Dates and times
+library(skimr)  # An automated EDA tool
+```
+
+## Reading Excel files
+
+```{r read_start_up}
+start_up <- read_excel("StartupDataCleanedR.xlsx")
+```
+
+## Data Prep
+
+Stats on age of company at sale or close? funding amount? funding rounds? 
+
+```{r summary}
+summary(start_up)
+str(start_up)
+skim(start_up)
+```
+
+
+```{r convert}
+# This creates a vector for the binary variables
+binary_vars <- c("labels", "is_CA", "is_NY", "is_MA", "is_TX", "is_otherstate", "is_software", "is_web", "is_mobile", "is_enterprise", "is_advertising", "is_gamesvideo", "is_ecommerce", "is_biotech", "is_consulting", "is_othercategory", "is_top500", "is_acquired", "is_closed")
+
+# This changes binary_vars to factors
+start_up[binary_vars] <- lapply(start_up[binary_vars], as.factor)
+
+# Convert founded_year to integer
+start_up$founded_year <- as.integer(start_up$founded_year)
+
+# Drop state_code.1. "Nearly" duplicate of state_code. It's identical with the exception of one missing value. 
+start_up <- start_up[, !names(start_up) %in%
+                       "state_code.1"]
+```
+
+## Exploratory Data Analysis (EDA)
+
+What is the distribution and concentration of start-ups across different states?
+
+```{r state_counts}
+state_counts <- apply(start_up[, c("is_CA", "is_NY", "is_MA", "is_TX", "is_otherstate")], 2, function(x) sum(x == 1))
+
+state_data <- data.frame(State = c("California", "New York", "Massachusetts", "Texas", "Other"), Count = state_counts)
+
+ggplot(state_data, aes(x = State, y = Count)) +
+  geom_bar(stat = "identity", fill = "blueviolet", color = "black") +
+  labs(title = "Distribution of Start-ups Across Different States",
+       x = "State", y = "Number of Start-ups") +
+  theme_minimal() +
+  scale_x_discrete(labels = c("is_CA" = "California",
+                              "is_NY" = "New York",
+                              "is_MA" = "Massachusetts",
+                              "is_TX" = "Texas",
+                              "is_otherstate" = "Other")) 
+
+state_data$Proportion <- state_data$Count / sum(state_data$Count)
+
+state_data
+
+```
+
+What is the distribution and concentration of start-ups across different categories?
+
+```{r category_counts}
+category_counts <- apply(start_up[, c(29:38)], 2, function(x) sum(x == 1))
+
+category_data <- data.frame(Category = c("Software", "Web", "Mobile", "Enterprise", "Advertising", "Games & Video", "E-Commerce", "Biotech", "Consulting", "Other"), Count = category_counts)
+
+ggplot(category_data, aes(x = Category, y = Count)) +
+  geom_bar(stat = "identity", fill = "blueviolet", color = "black") +
+  labs(title = "Distribution of Start-ups Across Categories",
+       x = "Category", y = "Number of Start-ups") +
+  theme_minimal() +
+  scale_x_discrete(labels = c("is_software" = "Software",
+                              "is_web" = "Web",
+                              "is_mobile" = "Mobile",
+                              "is_enterprise" = "Enterprise",
+                              "is_advertising" = "Advertising",
+                              "is_gamesvideo" = "Games & Video",
+                              "is_ecommerce" = "E-Commerce",
+                              "is_biotech" = "Biotech",
+                              "is_consulting" = "Consulting",
+                              "is_othercategory" = "Other")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+category_data$Proportion <- category_data$Count / sum(category_data$Count)
+
+category_data
+```
+
+Are there any relationships between funding amount and start-up success?
+
+```{r corr_funding}
+start_up$is_acquired_num <- as.numeric(as.factor(start_up$is_acquired))
+corr_funding <- cor.test(start_up$funding_total_usd, start_up$is_acquired_num)
+
+corr_funding
+```
+> Correlation is not statistically significant. P-value is 0.22, which is higher than 0.05, meaning funding is not significant in outcome status (acquired/closed). There doesn't appear to be a linear relationship between funding and start-up success (acquired). **There is not enough evidence to reject the null hypothesis that the true correlation is equal to 0. 
+
+Are there any relationships between top 500 and start-up success?
+
+```{r corr_top500}
+start_up$is_top500_num <- as.numeric(as.factor(start_up$is_top500))
+corr_top500 <- cor(start_up$is_acquired_num, start_up$is_top500_num)
+
+corr_top500
+```
+> Correlation coefficient of 0.3106518 indicates a moderate positive correlation between top 500 and acquired. This suggests that start-up companies listed in the top 500 companies are more likely to be acquired. This does not mean causation.
+
+
+
+## Statistical Analysis
+
+## Predictive Modeling
+
+## Results and Dissussion
+
+## Conclusion
+
+Can we answer these questions?
+
+*What is the distribution and concentration of start-ups across different states?
+*What is the distribution and concentration of start-ups across different categories?
+
+Are there any relationships between the time of funding and start-up success?
+*Is there a relationship between funding amount and start-up success?
+*Is there a relationship between top 500 and start-up success?
+
+What is the distribution of funding amounts received by start-ups?
+
+How does the frequency of funding rounds impact start-up success?
+
+Which industries have the highest and lowest success rates?
+Are there emerging industries with high growth potential?
+What proportion of start-ups have been acquired versus closed?
+
+Are start-ups in certain industries more likely to succeed than others?
+How does the acquisition rate vary across different industries or geographical regions?
+
+*Stats on age of company at sale or close? funding amount? funding rounds? 
+
+Can we predict if a start-up will be successful (get acquired)
+Can we develop a predictive model to forecast the likelihood of a start-up being acquired based on its characteristics and historical data?
+- When can each do a predictive model. 
+What features have the most significant impact on predicting start-up success?
+
+
+
