@@ -1,6 +1,6 @@
 ---
 title: "Start-Up Success"
-author: "mswartz"
+author: "mswartz, bmurueta, dadewole"
 date: "2024-03-24"
 output: html_document
 ---
