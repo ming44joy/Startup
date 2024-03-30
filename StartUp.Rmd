@@ -1,6 +1,6 @@
 ---
 title: "Start-Up Success"
-author: "mswartz, bmurueta, dadewole"
+author: "mswartz"
 date: "2024-03-24"
 output: html_document
 ---
@@ -149,21 +149,7 @@ corr_top500
 
 ## Conclusion
 
-Can we answer these questions?
-*What is the distribution and concentration of start-ups across different states?
-*What is the distribution and concentration of start-ups across different categories?
-*Is there a relationship between funding amount and start-up success?
-*Is there a relationship between top 500 and start-up success?
-*Stats on age of company at sale or close? funding amount? funding rounds? 
-Are there any relationships between the time of funding and start-up success?
-What is the distribution of funding amounts received by start-ups?
-How does the frequency of funding rounds impact start-up success?
-Which industries have the highest and lowest success rates?
-Are start-ups in certain industries more likely to succeed than others?
-How does the acquisition rate vary across different industries?
-What proportion of start-ups have been acquired versus closed?
-Can we predict if a start-up will be successful (get acquired)
-What features have the most significant impact on predicting start-up success?
+
 
 
 
