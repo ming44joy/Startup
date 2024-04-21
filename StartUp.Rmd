@@ -26,6 +26,9 @@ library(corrplot) # Correlation matrices
 library(caret) # Machine learning 
 library(lubridate) # Dates and times
 library(skimr)  # An automated EDA tool
+library(stats) # Stat functions 
+library(boot) # Bootstrap resampling 
+library(tidyr)
 ```
 
 ## Reading Excel files
@@ -44,11 +47,32 @@ skim(start_up)
 ```
 
 
-```{r convert}
+```{r compare_missing}
+# Check if there are missing values in "closed_at" for rows where "is_acquired" is TRUE
+missing_closed <- is.na(start_up$closed_at[start_up$is_acquired == 1])
+
+# Count the number of TRUE values (missing "closed_at" for acquired startups)
+missing_count <- sum(missing_closed)
+
+# Print the count of missing values
+print(paste("Number of missing 'closed_at' for acquired startups:", missing_count))
+
+# Check if both columns have NA's for the same records
+same_na_rows <- sum(is.na(start_up$age_first_milestone_year) & is.na(start_up$age_last_milestone_year))
+
+# Print the number of rows where both columns have NA's
+print(paste("Number of rows 'age_first_milestone_year' & 'age_last_milestone_year' columns both have NA's:", same_na_rows))
+
+
+```
+
+
+
+```{r convert_drop}
 # This creates a vector for the binary variables
 binary_vars <- c("labels", "is_CA", "is_NY", "is_MA", "is_TX", "is_otherstate", "is_software", "is_web", "is_mobile", "is_enterprise", "is_advertising", "is_gamesvideo", "is_ecommerce", "is_biotech", "is_consulting", "is_othercategory", "is_top500", "is_acquired", "is_closed")
 
-# This changes binary_vars to factors
+# Change binary_vars to factors
 start_up[binary_vars] <- lapply(start_up[binary_vars], as.factor)
 
 # Convert founded_year to integer
@@ -57,17 +81,35 @@ start_up$founded_year <- as.integer(start_up$founded_year)
 # Drop state_code.1. "Nearly" duplicate of state_code. It's identical with the exception of one missing value. 
 start_up <- start_up[, !names(start_up) %in%
                        "state_code.1"]
+
+# Drop closed_at column
+start_up <- start_up[, !names(start_up) %in% 
+                       "closed_at"]
+
+# Convert NA's to zeros
+start_up$age_first_milestone_year[is.na(start_up$age_first_milestone_year)] <- 0
+start_up$age_last_milestone_year[is.na(start_up$age_last_milestone_year)] <- 0
+
+# Add is_acquired_num, is_closed_num and is_top500_num columns to startup dataset
+start_up$is_acquired_num <- as.numeric(as.factor(start_up$is_acquired))
+start_up$is_closed_num <- as.numeric(as.factor(start_up$is_closed))
+start_up$is_top500_num <- as.numeric(as.factor(start_up$is_top500))
+
 ```
 
+
 ## Exploratory Data Analysis (EDA)
+
 
 What is the distribution and concentration of start-ups across different states?
 
 ```{r state_counts}
 state_counts <- apply(start_up[, c("is_CA", "is_NY", "is_MA", "is_TX", "is_otherstate")], 2, function(x) sum(x == 1))
 
+# Create data frame
 state_data <- data.frame(State = c("California", "New York", "Massachusetts", "Texas", "Other"), Count = state_counts)
 
+#  Barplot
 ggplot(state_data, aes(x = State, y = Count)) +
   geom_bar(stat = "identity", fill = "blueviolet", color = "black") +
   labs(title = "Distribution of Start-ups Across Different States",
@@ -79,7 +121,7 @@ ggplot(state_data, aes(x = State, y = Count)) +
                               "is_TX" = "Texas",
                               "is_otherstate" = "Other")) 
 
-state_data$Proportion <- state_data$Count / sum(state_data$Count)
+state_data$Proportion <- state_data$Count / sum(state_data$Count) * 100
 
 state_data
 
@@ -87,11 +129,24 @@ state_data
 
 What is the distribution and concentration of start-ups across different categories?
 
-```{r category_counts}
-category_counts <- apply(start_up[, c(29:38)], 2, function(x) sum(x == 1))
 
+```{r category_counts}
+# Category counts
+category_counts <- apply(start_up[, c("is_software",
+                              "is_web",
+                              "is_mobile",
+                              "is_enterprise",
+                              "is_advertising",
+                              "is_gamesvideo",
+                              "is_ecommerce",
+                              "is_biotech",
+                              "is_consulting",
+                              "is_othercategory")], 2, function(x) sum(x == 1))
+
+# Create data frame
 category_data <- data.frame(Category = c("Software", "Web", "Mobile", "Enterprise", "Advertising", "Games & Video", "E-Commerce", "Biotech", "Consulting", "Other"), Count = category_counts)
 
+# Barplot
 ggplot(category_data, aes(x = Category, y = Count)) +
   geom_bar(stat = "identity", fill = "blueviolet", color = "black") +
   labs(title = "Distribution of Start-ups Across Categories",
@@ -109,41 +164,277 @@ ggplot(category_data, aes(x = Category, y = Count)) +
                               "is_othercategory" = "Other")) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-category_data$Proportion <- category_data$Count / sum(category_data$Count)
+category_data$Proportion <- category_data$Count / sum(category_data$Count) * 100
 
 category_data
 ```
 
-Are there any relationships between funding amount and start-up success?
 
-```{r corr_funding}
-start_up$is_acquired_num <- as.numeric(as.factor(start_up$is_acquired))
-corr_funding <- cor.test(start_up$funding_total_usd, start_up$is_acquired_num)
+Are there any relationships between variables?
 
-corr_funding
+```{r corr_p_values}
+# Select numerical variables of interest
+numerical_vars <- c("age_first_funding_year", "age_last_funding_year", "age_first_milestone_year", 
+                    "age_last_milestone_year", "funding_rounds", "funding_total_usd", "is_top500_num")
+
+# Create an empty data frame to store correlation coefficients and p-values
+correlation_results <- data.frame(Variable = character(), Correlation = numeric(), P_Value = numeric(), stringsAsFactors = FALSE)
+
+# Calculate correlation coefficients and p-values for each numerical variable
+for (var in numerical_vars) {
+  # Calculate correlation coefficient
+  correlation <- cor(start_up[[var]], start_up$is_acquired_num)
+  
+  # Calculate p-value
+  cor_test <- cor.test(start_up$is_acquired_num, start_up[[var]])
+  p_value <- cor_test$p.value
+  
+  # Store results in the data frame
+  correlation_results <- rbind(correlation_results, data.frame(Variable = var, Correlation = correlation, P_Value = p_value))
+}
+
+# Print correlation coefficients and p-values
+print(correlation_results)
 ```
-> Correlation is not statistically significant. P-value is 0.22, which is higher than 0.05, meaning funding is not significant in outcome status (acquired/closed). There doesn't appear to be a linear relationship between funding and start-up success (acquired). **There is not enough evidence to reject the null hypothesis that the true correlation is equal to 0. 
 
-Are there any relationships between top 500 and start-up success?
+> age_first_funding_year: weak negative correlation and statistically significant	
+> age_last_funding_year: weak positive correlation and statistically significant	
+> age_first_milestone_year: moderate positive correlation and highly statistically 
 
-```{r corr_top500}
-start_up$is_top500_num <- as.numeric(as.factor(start_up$is_top500))
-corr_top500 <- cor(start_up$is_acquired_num, start_up$is_top500_num)
+> age_last_milestone_year: strong positive correlation and highly statistically significant		
 
-corr_top500
+> funding_rounds: moderate positive correlation and highly statistically significant		
+
+> funding_total_usd: weak positive correlation and not statistically significant		
+> is_top500_num: strong positive correlation and highly statistically significant		
+
+
+Which industries have the highest and lowest success rates?
+
+```{r success_rates}
+# Name columns
+industry_columns <- c("is_software" = "Software",
+                      "is_web" = "Web",
+                      "is_mobile" = "Mobile",
+                      "is_enterprise" = "Enterprise",
+                      "is_advertising" = "Advertising",
+                      "is_gamesvideo" = "Games & Video",
+                      "is_ecommerce" = "E-Commerce",
+                      "is_biotech" = "Biotech",
+                      "is_consulting" = "Consulting",
+                      "is_othercategory" = "Other")
+
+# Initialize vectors
+success_rates <- numeric(length(industry_columns))
+industry_names <- character(length(industry_columns))
+
+# Calculate success rates for each industry (loop)
+for (i in seq_along(industry_columns)) {
+  industry_name <- names(industry_columns)[i]
+  industry_label <- industry_columns[industry_name]
+  
+  # Filter successful startups for the current industry
+  successful_startups <- subset(start_up, start_up$is_acquired_num == 1 & start_up[[industry_name]] == 1)
+  
+  # Calculate success rate for the current industry
+  success_rate <- nrow(successful_startups) / sum(start_up[[industry_name]] == 1)  # Divide count of successful startups by total startups in the industry
+  
+  # Store success rate and industry names
+  success_rates[i] <- success_rate
+  industry_names[i] <- industry_label
+}
+
+# Combine industry names and success rates into a data frame
+industry_success_rates <- data.frame(Industry = industry_names, Success_Rate = success_rates)
+
+# Find the highest success rate 
+highest_success_rate <- industry_success_rates[which.max(industry_success_rates$Success_Rate), ]
+
+# If the highest success rate is "Other", find the second-highest
+if (highest_success_rate$Industry == "Other") {
+  highest_success_rate <- industry_success_rates[order(-industry_success_rates$Success_Rate), ][2, ]
+}
+
+# Find the lowest success rate 
+lowest_success_rate <- industry_success_rates[which.min(industry_success_rates$Success_Rate), ]
+
+# Display the highest success rate
+print(paste("Industry with the highest success rate:", highest_success_rate$Industry, "(", round(highest_success_rate$Success_Rate * 100, 2), "%)"))
+
+# Display the lowest success rate
+print(paste("Industry with the lowest success rate:", lowest_success_rate$Industry, "(", round(lowest_success_rate$Success_Rate * 100, 2), "%)"))
+
+
+# Barplot
+ggplot(industry_success_rates, aes(x = reorder(Industry, Success_Rate), y = Success_Rate * 100)) +
+  geom_bar(stat = "identity", fill = "blueviolet", color = "black") +
+  labs(title = "Success Rates Across Different Industries",
+       x = "Industry", y = "Success Rate (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
 ```
-> Correlation coefficient of 0.3106518 indicates a moderate positive correlation between top 500 and acquired. This suggests that start-up companies listed in the top 500 companies are more likely to be acquired. This does not mean causation.
 
+
+What proportion of start-ups have been acquired versus closed? 
+
+```{r proportion_acquired_closed}
+# Filter acquired startups
+acquired_count <- sum(start_up$status == "acquired")
+
+# Filter closed startups
+closed_count <- sum(start_up$status == "closed")
+
+# Calculate proportions
+total_startups <- nrow(start_up)
+acquired_proportion <- acquired_count / total_startups * 100
+closed_proportion <- closed_count / total_startups * 100
+
+# Round to 2 decimal places
+acquired_proportion <- round(acquired_proportion, 2)
+closed_proportion <- round(closed_proportion, 2)
+
+print(paste("Proportion of startups that are acquired:", acquired_proportion, "%"))
+print(paste("Proportion of startups that are closed:", closed_proportion, "%"))
+
+```
+What are the counts of acquired and closed start-up companies for each state?
+
+```{r acq_closed_counts_by_state}
+# Calculate counts
+acquired_startups <- start_up[start_up$is_acquired == 1, ]
+closed_startups <- start_up[start_up$is_closed == 1, ]
+
+# Table
+acquired_state_counts <- table(acquired_startups$state_code)
+closed_state_counts <- table(closed_startups$state_code)
+
+# Create data frames 
+acquired_state_data <- data.frame(State1 = names(acquired_state_counts), 'Acquired Count' = acquired_state_counts)
+closed_state_data <- data.frame(State2 = names(closed_state_counts), 'Closed Count' = closed_state_counts)
+
+# Merge data frames
+combined_state_data <- merge(acquired_state_data, closed_state_data, by.x = "State1", by.y = "State2", all = TRUE)
+
+# Name columns
+colnames(combined_state_data)[colnames(combined_state_data) == "Acquired Count.x"] <- "Acquired Count"
+colnames(combined_state_data)[colnames(combined_state_data) == "Closed Count.y"] <- "Closed Count"
+
+print(subset(combined_state_data, select = -c(Acquired.Count.Var1, Closed.Count.Var1)))
+```
+
+
+Are there significant differences in the acquisition rates of start-ups across different states?
+
+> The output of Fisher's exact test provides information about the statistical significance of the relationship between the two variables in the contingency table.
+
+```{r diff_acq_rates_states}
+# Contingency table
+contingency_table <- table(combined_state_data$State1, combined_state_data$`Acquired.Count.Freq`)
+
+# Fisher's exact test
+fisher_test <- fisher.test(contingency_table)
+
+print(fisher_test)
+```
+
+> A p-value of 1 indicates that there is no evidence to reject the null hypothesis, suggesting that there is no significant association between the acquisition rates of start-ups and the states they are located in. Therefore, based on this test, there are no significant differences in the acquisition rates across different states.
 
 
 ## Statistical Analysis
 
 > hypothesis testing or trend analysis.
 
+```{r mean_funding_rounds}
+# Calculate mean funding rounds for acquired start-ups
+mean_funding_rounds_acquired <- round(mean(start_up$funding_rounds[start_up$is_acquired == 1], na.rm = TRUE), 2)
+
+# Calculate mean funding rounds for closed start-ups
+mean_funding_rounds_closed <- round(mean(start_up$funding_rounds[start_up$is_closed == 1], na.rm = TRUE), 2)
+
+cat("Mean funding rounds for acquired start-ups: ", mean_funding_rounds_acquired, "\n")
+cat("Mean funding rounds for closed start-ups: ", mean_funding_rounds_closed, "\n")
+```
+
+
+```{r significant_vars}
+# Define the variables
+sign_vars <- c("age_first_funding_year", "age_last_funding_year", 
+               "age_first_milestone_year", "age_last_milestone_year", 
+               "funding_rounds")
+
+startup_colors <- c("closed" = "deeppink", "acquired" = "blueviolet")
+```
+
+
+```{r hist_plots}
+# Histograms
+histogram_plots <- lapply(sign_vars, function(var) {
+  ggplot(start_up, aes(x = !!sym(var), fill = status)) +
+    geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+    labs(title = paste("Histogram of", var, "by Startup Status"),
+         x = var,
+         y = "Frequency",
+         fill = "Startup Status") +
+    scale_fill_manual(values = startup_colors) +
+    theme_minimal()
+})
+
+# Print histograms
+print(histogram_plots)
+
+```
+
+
+```{r violin_plots}
+# Violin Plots
+violin_plots <- lapply(sign_vars, function(var) {
+  ggplot(start_up, aes(x = status, y = !!sym(var), fill = status)) +
+    geom_violin(trim = FALSE) +
+    labs(title = paste("Violin Plot of", var, "by Startup Status"),
+         x = "Startup Status",
+         y = var,
+         fill = "Startup Status") +
+    scale_fill_manual(values = startup_colors) +
+    theme_minimal()
+})
+print(violin_plots)
+```
+
+
+```{r boxplots}
+# Grouped boxplots
+boxplot_plots <- lapply(sign_vars, function(var) {
+  ggplot(start_up, aes(x = status, y = !!sym(var), fill = status)) +
+    geom_boxplot() +
+    labs(title = paste("Grouped Boxplot of", var, "by Startup Status"),
+         x = "Startup Status",
+         y = var,
+         fill = "Startup Status") +
+    scale_fill_manual(values = startup_colors) +
+    theme_minimal()
+})
+
+# Print the plots
+print(boxplot_plots)
+
+```
+
+
+
 ## Predictive Modeling
 
+
 > logistic regression, decision trees, and random forests.
-> evaluate model by accuracy, precision, recall, or ROC curve.
+> Evaluate model by accuracy, precision, recall, or ROC curve.
+
+
+Can we predict if a start-up will be successful (get acquired)?
+
+What features have the most significant impact on predicting start-up success? 
+
+
+
 
 ## Results and Dissussion
 
