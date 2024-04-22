@@ -594,9 +594,9 @@ cm_train_tree1
 
 
 ```{r decision_tree_train_plot}
+# This worked a few times, none of the data has changed and it doesn't display correctly now. It only shows relationships.
 
-rpart.plot(model_tree1$finalModel, box.palette = c("thistle", "lightpink"), shadow.col = "gray", nn = TRUE, extra = 100, cex = .8)
-
+# rpart.plot(model_tree1$finalModel, box.palette = c("thistle", "lightpink"), shadow.col = "gray", nn = TRUE, extra = 100, cex = .8)
 
 ```
 
