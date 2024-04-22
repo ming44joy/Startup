@@ -17,7 +17,6 @@ When you click the **Knit** button a document will be generated that includes bo
 
 ## Introduction
 
-
 ```{r load_library}
 library(readxl) # Read excel files
 library(ggplot2) # Visualizations
@@ -27,8 +26,10 @@ library(caret) # Machine learning
 library(lubridate) # Dates and times
 library(skimr)  # An automated EDA tool
 library(stats) # Stat functions 
-library(boot) # Bootstrap resampling 
 library(tidyr)
+library(car)
+library(rpart.plot)
+library(randomForest)
 ```
 
 ## Reading Excel files
@@ -38,7 +39,6 @@ start_up <- read_excel("StartupDataCleanedR.xlsx")
 ```
 
 ## Data Prep
-
 
 ```{r summary}
 summary(start_up)
@@ -67,7 +67,6 @@ print(paste("Number of rows 'age_first_milestone_year' & 'age_last_milestone_yea
 ```
 
 
-
 ```{r convert_drop}
 # This creates a vector for the binary variables
 binary_vars <- c("labels", "is_CA", "is_NY", "is_MA", "is_TX", "is_otherstate", "is_software", "is_web", "is_mobile", "is_enterprise", "is_advertising", "is_gamesvideo", "is_ecommerce", "is_biotech", "is_consulting", "is_othercategory", "is_top500", "is_acquired", "is_closed")
@@ -86,20 +85,27 @@ start_up <- start_up[, !names(start_up) %in%
 start_up <- start_up[, !names(start_up) %in% 
                        "closed_at"]
 
+# Covert rounds to factors
+start_up$has_VC <- as.factor(start_up$has_VC)
+start_up$has_angel <- as.factor(start_up$has_angel)
+start_up$has_roundA <- as.factor(start_up$has_roundA)
+start_up$has_roundB <- as.factor(start_up$has_roundB)
+start_up$has_roundC <- as.factor(start_up$has_roundC)
+start_up$has_roundD <- as.factor(start_up$has_roundD)
+
 # Convert NA's to zeros
 start_up$age_first_milestone_year[is.na(start_up$age_first_milestone_year)] <- 0
 start_up$age_last_milestone_year[is.na(start_up$age_last_milestone_year)] <- 0
 
 # Add is_acquired_num, is_closed_num and is_top500_num columns to startup dataset
-start_up$is_acquired_num <- as.numeric(as.factor(start_up$is_acquired))
-start_up$is_closed_num <- as.numeric(as.factor(start_up$is_closed))
-start_up$is_top500_num <- as.numeric(as.factor(start_up$is_top500))
+start_up$is_acquired_num <- ifelse(as.numeric(as.factor(start_up$is_acquired)) == 1, 1, 0)
+start_up$is_closed_num <- ifelse(as.numeric(as.factor(start_up$is_closed)) == 1, 1, 0)
+start_up$is_top500_num <- ifelse(as.numeric(as.factor(start_up$is_top500)) == 1, 1, 0)
+
 
 ```
 
-
 ## Exploratory Data Analysis (EDA)
-
 
 What is the distribution and concentration of start-ups across different states?
 
@@ -128,7 +134,6 @@ state_data
 ```
 
 What is the distribution and concentration of start-ups across different categories?
-
 
 ```{r category_counts}
 # Category counts
@@ -169,7 +174,6 @@ category_data$Proportion <- category_data$Count / sum(category_data$Count) * 100
 category_data
 ```
 
-
 Are there any relationships between variables?
 
 ```{r corr_p_values}
@@ -200,11 +204,8 @@ print(correlation_results)
 > age_first_funding_year: weak negative correlation and statistically significant	
 > age_last_funding_year: weak positive correlation and statistically significant	
 > age_first_milestone_year: moderate positive correlation and highly statistically 
-
 > age_last_milestone_year: strong positive correlation and highly statistically significant		
-
 > funding_rounds: moderate positive correlation and highly statistically significant		
-
 > funding_total_usd: weak positive correlation and not statistically significant		
 > is_top500_num: strong positive correlation and highly statistically significant		
 
@@ -275,7 +276,6 @@ ggplot(industry_success_rates, aes(x = reorder(Industry, Success_Rate), y = Succ
 
 ```
 
-
 What proportion of start-ups have been acquired versus closed? 
 
 ```{r proportion_acquired_closed}
@@ -298,6 +298,7 @@ print(paste("Proportion of startups that are acquired:", acquired_proportion, "%
 print(paste("Proportion of startups that are closed:", closed_proportion, "%"))
 
 ```
+
 What are the counts of acquired and closed start-up companies for each state?
 
 ```{r acq_closed_counts_by_state}
@@ -323,7 +324,6 @@ colnames(combined_state_data)[colnames(combined_state_data) == "Closed Count.y"]
 print(subset(combined_state_data, select = -c(Acquired.Count.Var1, Closed.Count.Var1)))
 ```
 
-
 Are there significant differences in the acquisition rates of start-ups across different states?
 
 > The output of Fisher's exact test provides information about the statistical significance of the relationship between the two variables in the contingency table.
@@ -343,8 +343,6 @@ print(fisher_test)
 
 ## Statistical Analysis
 
-> hypothesis testing or trend analysis.
-
 ```{r mean_funding_rounds}
 # Calculate mean funding rounds for acquired start-ups
 mean_funding_rounds_acquired <- round(mean(start_up$funding_rounds[start_up$is_acquired == 1], na.rm = TRUE), 2)
@@ -355,7 +353,7 @@ mean_funding_rounds_closed <- round(mean(start_up$funding_rounds[start_up$is_clo
 cat("Mean funding rounds for acquired start-ups: ", mean_funding_rounds_acquired, "\n")
 cat("Mean funding rounds for closed start-ups: ", mean_funding_rounds_closed, "\n")
 ```
-
+> Acquired startups tend to have more funding rounds.
 
 ```{r significant_vars}
 # Define the variables
@@ -420,27 +418,269 @@ print(boxplot_plots)
 
 ```
 
-
-
 ## Predictive Modeling
 
+```{r partition}
+# Simple partition into train (80%) and test (20%) set 
+set.seed(687) # Do NOT change this
+trainIndex <- createDataPartition(start_up$is_acquired, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
 
-> logistic regression, decision trees, and random forests.
-> Evaluate model by accuracy, precision, recall, or ROC curve.
+start_up_train <- start_up[trainIndex, ]  
+start_up_test <- start_up[-trainIndex, ]
+
+# rm(trainIndex) Remove this when you no longer need it!
+```
 
 
-Can we predict if a start-up will be successful (get acquired)?
+```{r table_train}
+table(start_up_train$is_acquired)
+
+start_up_train$is_acquired %>%
+  table() %>%
+  prop.table() * 100
+
+```
+> There are 261 instances where the startup is not acquired (0).
+> There are 478 instances where the startup is acquired (1).
+
+> Approximately 35.32% of startups in the training set are not acquired.
+> Approximately 64.68% of startups in the training set are acquired.
+
+
+```{r histogram_train}
+# Histograms
+histogram_plots_train <- lapply(sign_vars, function(var) {
+  ggplot(start_up_train, aes(x = !!sym(var), fill = status)) +
+    geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+    labs(title = paste("Histogram of", var, "by Startup Status"),
+         x = var,
+         y = "Frequency",
+         fill = "Startup Status") +
+    scale_fill_manual(values = startup_colors) +
+    theme_minimal()
+})
+
+print(histogram_plots_train)
+```
+
+
+```{r violin_train}
+# Violin Plots
+violin_plots_train <- lapply(sign_vars, function(var) {
+  ggplot(start_up_train, aes(x = status, y = !!sym(var), fill = status)) +
+    geom_violin(trim = FALSE) +
+    labs(title = paste("Violin Plot of", var, "by Startup Status"),
+         x = "Startup Status",
+         y = var,
+         fill = "Startup Status") +
+    scale_fill_manual(values = startup_colors) +
+    theme_minimal()
+})
+
+print(violin_plots_train)
+```
+
+
+```{r boxplot_train}
+# Grouped boxplots
+boxplot_plots_train <- lapply(sign_vars, function(var) {
+  ggplot(start_up_train, aes(x = status, y = !!sym(var), fill = status)) +
+    geom_boxplot() +
+    labs(title = paste("Grouped Boxplot of", var, "by Startup Status"),
+         x = "Startup Status",
+         y = var,
+         fill = "Startup Status") +
+    scale_fill_manual(values = startup_colors) +
+    theme_minimal()
+})
+
+print(boxplot_plots_train)
+```
+
+
+```{r corr_matrix_train}
+# Calculate correlation matrix
+corrmat <- cor(start_up_train[, c("age_first_funding_year", "age_last_funding_year", "age_first_milestone_year", 
+                                   "age_last_milestone_year", "funding_rounds", "funding_total_usd", 
+                                   "founded_year", "relationships", "milestones", "is_top500_num", 
+                                   "is_acquired_num")])
+
+# Create correlation plot
+corrplot::corrplot(corrmat)
+
+# Print correlation values
+cor(start_up_train[, c("age_first_funding_year", "age_last_funding_year", "age_first_milestone_year", 
+                       "age_last_milestone_year", "funding_rounds", "funding_total_usd", 
+                       "is_top500_num", "founded_year", "relationships", "milestones", 
+                       "is_acquired_num")])
+```
+> There is a strong positive corroleation between age_first_funding_year and age_last_funding_year, and a strong positive correlation between age_first_milestone_year and age_last_milestone_year. When dealing with dates, for example, if a startup recieved their first funding earlier, they likely recieved their last funding earlier also. Same goes for milestones.  
+
+
+```{r var_selection}
+# Define the columns you want to include in the model
+selected_columns <- c("relationships", "milestones", "is_software", "is_web", "is_mobile", 
+                      "is_enterprise", "is_advertising", "is_gamesvideo", "is_ecommerce", 
+                      "is_biotech", "is_consulting", "is_othercategory", "avg_participants", 
+                      "is_top500", "is_acquired")
+
+# Create a new training dataset with selected columns
+start_up_train_selected <- start_up_train[, selected_columns]
+
+# Create a new testing dataset with selected columns
+start_up_test_selected <- start_up_test[, selected_columns]
+```
+
+Can we predict if a start-up will be successful (get acquired)? 
+
+```{r tree_null}
+# Create a vector of 0's for is_acquired variable
+model_train_null <- rep(0, nrow(start_up_train_selected))
+model_test_null <- rep(0, nrow(start_up_test_selected))
+
+# Confusion matrix for training data
+cm_train_null <- caret::confusionMatrix(as.factor(model_train_null), start_up_train_selected$is_acquired, positive = "1")
+cm_train_null
+
+# Confusion matrix for test data
+cm_test_null <- caret::confusionMatrix(as.factor(model_test_null), start_up_test_selected$is_acquired, positive = "1")
+cm_test_null
+```
+
+
+```{r lr1_train}
+# Train the logistic regression model with selected variables
+model_lr <- glm(is_acquired ~ . - is_acquired, 
+                data = start_up_train_selected, family = binomial(link = "logit"), maxit = 1000)
+
+# Convert fitted model values to fitted classes. Use 0.5 as the threshold for classifying a case as a 1.
+class_train_lr <- as.factor(ifelse(predict(model_lr, type = "response") > 0.5, 1, 0))
+
+# Confusion matrix for training set
+cm_train_lr <- confusionMatrix(class_train_lr, start_up_train_selected$is_acquired, positive = "1")
+
+cm_train_lr
+
+```
+
+
+```{r lr1_test}
+pred_lr <- predict(model_lr, newdata = start_up_test_selected, type = "response")
+
+class_test_lr <- as.factor(ifelse(pred_lr > 0.5, 1, 0)) 
+
+cm_test_lr <- confusionMatrix(class_test_lr, start_up_test_selected$is_acquired, positive = "1")
+cm_test_lr
+```
+
+
+```{r decision_tree_train}
+# Train the decision tree model
+model_tree1 <- train(is_acquired ~ ., 
+                     data = start_up_train_selected, 
+                     method = "rpart")
+
+# Make predictions on the training set
+class_train_tree1 <- predict(model_tree1, type = "raw")
+
+# Compute confusion matrix for training set
+cm_train_tree1 <- confusionMatrix(class_train_tree1, start_up_train_selected$is_acquired, positive = "1")
+
+# View the confusion matrix
+cm_train_tree1
+```
+
+
+```{r decision_tree_train_plot}
+
+rpart.plot(model_tree1$finalModel, box.palette = c("thistle", "lightpink"), shadow.col = "gray", nn = TRUE, extra = 100, cex = .8)
+
+
+```
+
+
+```{r decision_tree_test}
+pred_tree1 <- predict(model_tree1, newdata = start_up_test_selected, type = "raw")
+
+cm_test_tree1 <- confusionMatrix(pred_tree1, start_up_test_selected$is_acquired, positive="1")
+cm_test_tree1
+```
+
+
+```{r random_forest_train}
+# Train the random forest model
+rf1_train <- randomForest(is_acquired ~ ., data = start_up_train_selected)
+
+# View the random forest model summary
+rf1_train
+
+# Calculate confusion matrix
+rf1_train_conf_mat <- table(start_up_train_selected$is_acquired, predict(rf1_train))
+
+# Calculate accuracy
+accuracy <- sum(diag(rf1_train_conf_mat)) / sum(rf1_train_conf_mat)
+
+# Calculate sensitivity
+sensitivity <- rf1_train_conf_mat[2, 2] / sum(rf1_train_conf_mat[2, ])
+
+# Calculate specificity
+specificity <- rf1_train_conf_mat[1, 1] / sum(rf1_train_conf_mat[1, ])
+
+# Print results
+cat("Accuracy:", accuracy, "\n")
+cat("Sensitivity:", sensitivity, "\n")
+cat("Specificity:", specificity, "\n")
+```
+
+
+```{r random_forest_test}
+# Train the random forest model
+rf1_test <- randomForest(is_acquired ~ ., data = start_up_test_selected)
+
+# View the random forest model summary
+print(rf1_test)
+
+# Make predictions on the test set
+predictions <- predict(rf1_test, newdata = start_up_test_selected)
+
+# Calculate confusion matrix
+rf1_test_conf_mat <- table(start_up_test_selected$is_acquired, predictions)
+
+# Calculate accuracy
+accuracy <- sum(diag(rf1_test_conf_mat)) / sum(rf1_test_conf_mat)
+
+# Calculate sensitivity
+sensitivity <- rf1_test_conf_mat[2, 2] / sum(rf1_test_conf_mat[2, ])
+
+# Calculate specificity
+specificity <- rf1_test_conf_mat[1, 1] / sum(rf1_test_conf_mat[1, ])
+
+# Print results
+cat("Accuracy:", accuracy, "\n")
+cat("Sensitivity:", sensitivity, "\n")
+cat("Specificity:", specificity, "\n")
+
+```
+
+> Random forest model did the best. 
+
 
 What features have the most significant impact on predicting start-up success? 
 
+```{r var_importance}
+var_importance <- importance(rf1_test)
+var_importance
 
+varImpPlot(rf1_test, main = "Variable Importance Plot")
+```
 
+> Relationships, avg_participants, milestones and is_top500 are most important. 
 
 ## Results and Dissussion
 
-## Conclusion
-
-
+> The results indicate that startup success can be predicted with reasonable accuracy using machine learning techniques. Important features identified in the analysis provide insights into factors that contribute to startup success. Further research could explore additional features and models to improve predictive performance.
 
 
 
