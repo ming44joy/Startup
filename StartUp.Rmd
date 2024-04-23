@@ -179,7 +179,7 @@ Are there any relationships between variables?
 ```{r corr_p_values}
 # Select numerical variables of interest
 numerical_vars <- c("age_first_funding_year", "age_last_funding_year", "age_first_milestone_year", 
-                    "age_last_milestone_year", "funding_rounds", "funding_total_usd", "is_top500_num")
+                    "age_last_milestone_year", "funding_rounds", "funding_total_usd", "is_top500_num", "relationships", "funding_rounds", "avg_participants", "milestones")
 
 # Create an empty data frame to store correlation coefficients and p-values
 correlation_results <- data.frame(Variable = character(), Correlation = numeric(), P_Value = numeric(), stringsAsFactors = FALSE)
@@ -207,8 +207,11 @@ print(correlation_results)
 > age_last_milestone_year: strong positive correlation and highly statistically significant		
 > funding_rounds: moderate positive correlation and highly statistically significant		
 > funding_total_usd: weak positive correlation and not statistically significant		
-> is_top500_num: strong positive correlation and highly statistically significant		
-
+> is_top500_num: strong positive correlation and highly statistically significant
+> relationoships: moderate negative corrlation and highly statistically significant
+> funding_rounds: moderate negative corrlation and highly statistically significant
+> avg_participants: weak negative correlation and highly statistically significant
+> milestones: strong negative correlation and highly statistically significant
 
 Which industries have the highest and lowest success rates?
 
